@@ -37,6 +37,9 @@ enum Commands {
         #[arg(short, long)]
         filename: String,
 
+        #[arg(short, long, help = "Existing filters to compare against.")]
+        existing: Option<String>,
+
         #[arg(short, long, default_value_t = 10)]
         count: usize,
 
@@ -50,14 +53,16 @@ enum Commands {
 
 fn main() {
     let cli = CLI::parse();
+
     match &cli.command {
         Commands::Analyze {
             filename,
+            existing,
             count,
             open,
             live,
         } => {
-            if let Err(err) = commands::analyze::run(filename, *count, *open, *live) {
+            if let Err(err) = commands::analyze::run(filename, existing, *count, *open, *live) {
                 eprintln!("Failed to run analysis: {}", err);
             }
         }

@@ -1,6 +1,6 @@
 use crate::{errors, models::filter::Filter};
 
-use std::{fs, io::BufReader};
+use std::{collections::HashSet, fs, io::BufReader};
 
 fn is_valid_roi(roi: f32) -> bool {
     roi >= 20.0
@@ -23,10 +23,22 @@ fn get_base_url(live: bool, filename: &String) -> &'static str {
     pre_match_url
 }
 
+fn load_data(filename: &str) -> Result<Vec<Filter>, errors::CliError> {
+    let file = fs::File::open(filename)?;
+    let reader = BufReader::new(file);
+    let data: Vec<Filter> = serde_json::from_reader(reader)?;
+    Ok(data)
+}
+
 fn calculate_score(filter: &Filter) -> f64 {
-    let roi_weight = 0.5;
+    // roi
+    let roi_weight = 0.8;
+
+    // success rate
     let sr_weight = 0.3;
-    let ps_weight = 0.2;
+
+    // picks
+    let ps_weight = 0.1;
 
     if filter.roi < 0.0 {
         return 0.0;
@@ -37,11 +49,56 @@ fn calculate_score(filter: &Filter) -> f64 {
         + ps_weight * filter.total_picks as f64
 }
 
-pub fn run(filename: &str, count: usize, open: bool, live: bool) -> Result<(), errors::CliError> {
-    let file = fs::File::open(filename)?;
-    let reader = BufReader::new(file);
+fn remove_existing_filters(
+    data: Vec<Filter>,
+    existing: &str,
+) -> Result<Vec<Filter>, errors::CliError> {
+    let existing_data = load_data(existing)?;
+    let existing_set: HashSet<_> = existing_data.iter().collect();
 
-    let data: Vec<Filter> = serde_json::from_reader(reader)?;
+    Ok(data
+        .into_iter()
+        .filter(|filter| !existing_set.contains(filter))
+        .collect())
+}
+
+fn display_data(data: &[Filter], open: bool, live: bool, filename: &str) {
+    let base_url = get_base_url(live, &filename.to_string());
+
+    for (i, item) in data.iter().enumerate() {
+        let url = format!("{}/{}/history", base_url, item.id);
+
+        if open {
+            if let Err(err) = open::that(&url) {
+                eprintln!("Failed to open URL: {}. Error: {}", url, err);
+            }
+            continue;
+        }
+
+        println!(
+            "ROI: {:.2}%\nTotal Picks: {}\nSuccess Rate: {:.2}%\nScore is {:.2}\nURL: {}",
+            item.roi, item.total_picks, item.success_rate, item.score, url,
+        );
+
+        if i < data.len() - 1 {
+            println!("\n")
+        }
+    }
+}
+
+pub fn run(
+    filename: &str,
+    existing: &Option<String>,
+    count: usize,
+    open: bool,
+    live: bool,
+) -> Result<(), errors::CliError> {
+    let data = load_data(filename)?;
+    let data = if let Some(existing) = existing {
+        remove_existing_filters(data, existing)?
+    } else {
+        data
+    };
 
     let mut filtered_data: Vec<Filter> = data
         .into_iter()
@@ -59,27 +116,7 @@ pub fn run(filename: &str, count: usize, open: bool, live: bool) -> Result<(), e
     });
     filtered_data.truncate(count);
 
-    let base_url = get_base_url(live, &filename.to_string());
-
-    for (i, item) in filtered_data.iter().enumerate() {
-        let url = format!("{}/{}/history", base_url, item.id);
-
-        if open {
-            if let Err(err) = open::that(&url) {
-                eprintln!("Failed to open URL: {}. Error: {}", url, err);
-            }
-            continue;
-        }
-
-        println!(
-            "ROI: {:.2}%\nTotal Picks: {}\nSuccess Rate: {:.2}%\nScore is {:.2}\nURL: {}",
-            item.roi, item.total_picks, item.success_rate, item.score, url,
-        );
-
-        if i < filtered_data.len() - 1 {
-            println!("\n")
-        }
-    }
+    display_data(&filtered_data, open, live, filename);
 
     Ok(())
 }
