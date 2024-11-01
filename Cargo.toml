@@ -1,5 +1,5 @@
 [package]
-name = "betmines-filter-analyzer"
+name = "betmines-cli"
 version = "0.1.0"
 edition = "2021"
 

@@ -37,17 +37,27 @@ enum Commands {
         #[arg(short, long)]
         filename: String,
 
-        #[arg(short, long, help = "Existing filters to compare against.")]
+        #[arg(long, help = "Existing filters to compare against.")]
         existing: Option<String>,
 
-        #[arg(short, long, default_value_t = 10)]
+        #[arg(long, default_value_t = 10)]
         count: usize,
 
-        #[arg(short, long, help = "Opens in default web browser")]
+        #[arg(long, help = "Opens in default web browser")]
         open: bool,
 
-        #[arg(short, long, help = "Treats file as live filter data")]
+        #[arg(long, help = "Treats file as live filter data")]
         live: bool,
+
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Offsets the count by supplied value"
+        )]
+        offset: usize,
+
+        #[arg(short, long, help = "Prints verbose output")]
+        verbose: bool,
     },
 }
 
@@ -61,8 +71,12 @@ fn main() {
             count,
             open,
             live,
+            offset,
+            verbose,
         } => {
-            if let Err(err) = commands::analyze::run(filename, existing, *count, *open, *live) {
+            if let Err(err) =
+                commands::analyze::run(filename, existing, *count, *open, *live, *offset, *verbose)
+            {
                 eprintln!("Failed to run analysis: {}", err);
             }
         }

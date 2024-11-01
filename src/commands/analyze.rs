@@ -62,7 +62,7 @@ fn remove_existing_filters(
         .collect())
 }
 
-fn display_data(data: &[Filter], open: bool, live: bool, filename: &str) {
+fn display_data(data: &[Filter], open: bool, live: bool, verbose: bool, filename: &str) {
     let base_url = get_base_url(live, &filename.to_string());
 
     for (i, item) in data.iter().enumerate() {
@@ -75,13 +75,17 @@ fn display_data(data: &[Filter], open: bool, live: bool, filename: &str) {
             continue;
         }
 
-        println!(
-            "ROI: {:.2}%\nTotal Picks: {}\nSuccess Rate: {:.2}%\nScore is {:.2}\nURL: {}",
-            item.roi, item.total_picks, item.success_rate, item.score, url,
-        );
+        if verbose {
+            println!(
+                "ROI: {:.2}%\nTotal Picks: {}\nSuccess Rate: {:.2}%\nScore is {:.2}\nURL: {}",
+                item.roi, item.total_picks, item.success_rate, item.score, url,
+            );
 
-        if i < data.len() - 1 {
-            println!("\n")
+            if i < data.len() - 1 {
+                println!("\n")
+            }
+        } else {
+            println!("{}", url);
         }
     }
 }
@@ -92,6 +96,8 @@ pub fn run(
     count: usize,
     open: bool,
     live: bool,
+    offset: usize,
+    verbose: bool,
 ) -> Result<(), errors::CliError> {
     let data = load_data(filename)?;
     let data = if let Some(existing) = existing {
@@ -100,6 +106,11 @@ pub fn run(
         data
     };
 
+    // remove identical filters
+    let set: HashSet<Filter> = data.into_iter().collect();
+    let data: Vec<Filter> = set.into_iter().collect();
+
+    // filter data based on ROI and desired outcome
     let mut filtered_data: Vec<Filter> = data
         .into_iter()
         .filter(|entry| is_valid_roi(entry.roi) && is_valid_desired_outcome(&entry.desired_outcome))
@@ -109,14 +120,20 @@ pub fn run(
         })
         .collect();
 
+    // sort by score to get the best filters
     filtered_data.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+
+    if offset > 0 {
+        filtered_data = filtered_data.into_iter().skip(offset).collect();
+    }
+
     filtered_data.truncate(count);
 
-    display_data(&filtered_data, open, live, filename);
+    display_data(&filtered_data, open, live, verbose, filename);
 
     Ok(())
 }
