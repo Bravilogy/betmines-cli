@@ -2,8 +2,12 @@ use crate::{errors, models::filter::Filter};
 
 use std::{collections::HashSet, fs, io::BufReader};
 
-fn is_valid_roi(roi: f32) -> bool {
-    roi >= 20.0
+fn is_valid_roi(roi: &f32) -> bool {
+    *roi >= 20.0
+}
+
+fn is_valid_picks(picks: &u32) -> bool {
+    *picks >= 15
 }
 
 fn is_valid_desired_outcome(outcome: &Option<String>) -> bool {
@@ -113,7 +117,11 @@ pub fn run(
     // filter data based on ROI and desired outcome
     let mut filtered_data: Vec<Filter> = data
         .into_iter()
-        .filter(|entry| is_valid_roi(entry.roi) && is_valid_desired_outcome(&entry.desired_outcome))
+        .filter(|entry| {
+            is_valid_roi(&entry.roi)
+                && is_valid_desired_outcome(&entry.desired_outcome)
+                && is_valid_picks(&entry.total_picks)
+        })
         .map(|mut entry| {
             entry.score = calculate_score(&entry);
             entry
