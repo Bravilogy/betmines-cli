@@ -1,35 +1,44 @@
 use crate::errors;
 use crate::models::filter::Filter;
-use crate::utils::url;
+use crate::services::filter_service;
+use crate::utils::{config, filesystem, paths};
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
+pub fn run(filename: String, live: bool) -> Result<(), errors::CliError> {
+    let file_path = if filename.is_empty() {
+        paths::get_existing_path(live).to_string()
+    } else {
+        filename.clone()
+    };
 
-pub fn run(filename: &String, live: bool) -> Result<(), errors::CliError> {
-    let file = File::open(filename)?;
-    let reader = BufReader::new(file);
+    let data: Vec<Filter> = filesystem::load_data(file_path)?;
+    log::info!("Loaded {} filters to duplicate analysis", data.len());
 
-    let data: Vec<Filter> = serde_json::from_reader(reader)?;
+    let duplicates = filter_service::find_duplicates(&data);
+    log::info!("Found {} sets of duplicate filters", duplicates.len());
 
-    let mut seen: HashMap<Filter, Vec<i32>> = HashMap::new();
-
-    for filter in data.iter() {
-        seen.entry(filter.clone())
-            .or_insert_with(Vec::new)
-            .push(filter.id);
+    // If no duplicates found, log and return
+    if duplicates.is_empty() {
+        log::info!("No duplicate filters found");
+        return Ok(());
     }
 
-    let base_url = url::get_base_url(filename, live);
+    let base_url = config::get_web_base_url(live);
 
-    for (_, ids) in seen.iter() {
-        if ids.len() == 1 {
-            continue;
+    for (filter, ids) in duplicates {
+        log::info!("\nIdentical filters found ({} duplicates):", ids.len());
+        if let Some(outcome) = &filter.desired_outcome {
+            log::info!("Desired outcome: {}", outcome);
         }
 
-        println!("\nIdentical filters:");
+        log::info!(
+            "ROI: {:.2}%, Success Rate: {:.2}%",
+            filter.roi,
+            filter.success_rate
+        );
+
         for id in ids {
-            println!("URL: {}", format!("{}/{}/history", base_url, id));
+            let url = format!("{}/{}/history", base_url, id);
+            log::info!("Filter ID {}: {}", id, url);
         }
     }
 

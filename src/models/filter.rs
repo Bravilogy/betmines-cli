@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
+use super::filter_traits::{FilterScoring, FilterValidation};
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Rule {
     pub target: Option<String>,
@@ -84,9 +86,41 @@ pub struct Filter {
 
     #[serde(rename = "desiredOutcome")]
     pub desired_outcome: Option<String>,
+}
 
-    #[serde(skip)]
-    pub score: f64,
+impl FilterValidation for Filter {
+    fn is_low_performing(&self) -> bool {
+        self.success_rate < 50.0 && self.roi < 10.0 && self.total_picks > 20
+    }
+
+    fn is_valid(&self) -> bool {
+        self.roi >= 20.0
+            && self.total_picks >= 15
+            && self.desired_outcome.as_ref().map_or(false, |value| {
+                !value.starts_with("CO") && !value.starts_with("CU")
+            })
+    }
+}
+
+impl FilterScoring for Filter {
+    fn get_score(&self) -> f64 {
+        // roi
+        let roi_weight = 0.8;
+
+        // success rate
+        let sr_weight = 0.3;
+
+        // picks
+        let ps_weight = 0.1;
+
+        if self.roi < 0.0 {
+            return 0.0;
+        }
+
+        roi_weight * self.roi as f64
+            + sr_weight * self.success_rate as f64
+            + ps_weight * self.total_picks as f64
+    }
 }
 
 impl Eq for Filter {}

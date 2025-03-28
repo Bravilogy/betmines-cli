@@ -1,147 +1,94 @@
-use crate::{errors, models::filter::Filter};
+use crate::{
+    errors::CliError,
+    models::filter::Filter,
+    services::filter_service,
+    utils::{command, filesystem, paths},
+};
 
-use std::{collections::HashSet, fs, io::BufReader};
+use std::collections::HashSet;
 
-fn is_valid_roi(roi: &f32) -> bool {
-    *roi >= 20.0
-}
+fn import_filters(filters: &[Filter], live: bool) -> Result<(), CliError> {
+    log::info!("Starting import of {} filters", filters.len());
 
-fn is_valid_picks(picks: &u32) -> bool {
-    *picks >= 15
-}
+    let mut success_count = 0;
+    let mut failure_count = 0;
 
-fn is_valid_desired_outcome(outcome: &Option<String>) -> bool {
-    outcome.as_ref().map_or(false, |value| {
-        !value.starts_with("CO") && !value.starts_with("CU")
-    })
-}
-
-fn get_base_url(live: bool, filename: &String) -> &'static str {
-    let live_url = "https://betmines.com/vip/live-filters";
-    let pre_match_url = "https://betmines.com/vip/pre-match-scanner-for-football";
-
-    if live || filename.contains("live") {
-        return live_url;
-    }
-
-    pre_match_url
-}
-
-fn load_data(filename: &str) -> Result<Vec<Filter>, errors::CliError> {
-    let file = fs::File::open(filename)?;
-    let reader = BufReader::new(file);
-    let data: Vec<Filter> = serde_json::from_reader(reader)?;
-    Ok(data)
-}
-
-fn calculate_score(filter: &Filter) -> f64 {
-    // roi
-    let roi_weight = 0.8;
-
-    // success rate
-    let sr_weight = 0.3;
-
-    // picks
-    let ps_weight = 0.1;
-
-    if filter.roi < 0.0 {
-        return 0.0;
-    }
-
-    roi_weight * filter.roi as f64
-        + sr_weight * filter.success_rate as f64
-        + ps_weight * filter.total_picks as f64
-}
-
-fn remove_existing_filters(
-    data: Vec<Filter>,
-    existing: &str,
-) -> Result<Vec<Filter>, errors::CliError> {
-    let existing_data = load_data(existing)?;
-    let existing_set: HashSet<_> = existing_data.iter().collect();
-
-    Ok(data
-        .into_iter()
-        .filter(|filter| !existing_set.contains(filter))
-        .collect())
-}
-
-fn display_data(data: &[Filter], open: bool, live: bool, verbose: bool, filename: &str) {
-    let base_url = get_base_url(live, &filename.to_string());
-
-    for (i, item) in data.iter().enumerate() {
-        let url = format!("{}/{}/history", base_url, item.id);
-
-        if open {
-            if let Err(err) = open::that(&url) {
-                eprintln!("Failed to open URL: {}. Error: {}", url, err);
+    for filter in filters {
+        match command::import_filter(filter.id, live) {
+            Ok(_) => {
+                log::info!("Successfully imported filter {}", filter.id);
+                success_count += 1;
             }
-            continue;
-        }
-
-        if verbose {
-            println!(
-                "ROI: {:.2}%\nTotal Picks: {}\nSuccess Rate: {:.2}%\nScore is {:.2}\nURL: {}",
-                item.roi, item.total_picks, item.success_rate, item.score, url,
-            );
-
-            if i < data.len() - 1 {
-                println!("\n")
+            Err(e) => {
+                log::error!("Failed to import filter {}: {}", filter.id, e);
+                failure_count += 1;
             }
-        } else {
-            println!("{}", url);
         }
     }
+
+    log::info!(
+        "Import completed. Success: {}, Failures: {}",
+        success_count,
+        failure_count
+    );
+
+    Ok(())
 }
 
 pub fn run(
-    filename: &str,
+    filename: String,
     existing: &Option<String>,
     count: usize,
     open: bool,
     live: bool,
     offset: usize,
+    autoimport: bool,
     verbose: bool,
-) -> Result<(), errors::CliError> {
-    let data = load_data(filename)?;
-    let data = if let Some(existing) = existing {
-        remove_existing_filters(data, existing)?
-    } else {
-        data
-    };
+) -> Result<(), CliError> {
+    // Determine existing filters file path
+    let existing_path = existing
+        .clone()
+        .unwrap_or_else(|| paths::get_existing_path(live).to_string());
 
-    // remove identical filters
-    let set: HashSet<Filter> = data.into_iter().collect();
-    let data: Vec<Filter> = set.into_iter().collect();
+    // Load and filter data
+    let raw_data: Vec<Filter> = filesystem::load_data(filename)?;
+    log::info!("Loaded {} filters from source file", raw_data.len());
 
-    // filter data based on ROI and desired outcome
-    let mut filtered_data: Vec<Filter> = data
-        .into_iter()
-        .filter(|entry| {
-            is_valid_roi(&entry.roi)
-                && is_valid_desired_outcome(&entry.desired_outcome)
-                && is_valid_picks(&entry.total_picks)
-        })
-        .map(|mut entry| {
-            entry.score = calculate_score(&entry);
-            entry
-        })
-        .collect();
+    // Remove filters that already exist
+    let filtered_data = filter_service::remove_existing_filters(raw_data, &existing_path)?;
+    log::info!(
+        "Found {} new filters after removing existing ones",
+        filtered_data.len()
+    );
 
-    // sort by score to get the best filters
-    filtered_data.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let unique_set: HashSet<Filter> = filtered_data.into_iter().collect();
+    let unique_data: Vec<Filter> = unique_set.into_iter().collect();
+    log::info!(
+        "Found {} unique filters after deduplication",
+        unique_data.len()
+    );
 
+    // Filter by validity criteria
+    let valid_filters = filter_service::filter_valid_entries(unique_data);
+    log::info!("Found {} valid filters", valid_filters.len());
+
+    let mut sorted_filters = filter_service::sort_by_score(valid_filters);
+
+    // Apply offset if specified
     if offset > 0 {
-        filtered_data = filtered_data.into_iter().skip(offset).collect();
+        sorted_filters = sorted_filters.into_iter().skip(offset).collect();
+        log::info!("Applied offset of {}", offset);
     }
 
-    filtered_data.truncate(count);
+    // Limit to requested count
+    sorted_filters.truncate(count);
+    log::info!("Selected top {} filters", sorted_filters.len());
 
-    display_data(&filtered_data, open, live, verbose, filename);
+    if autoimport {
+        import_filters(&sorted_filters, live)?;
+    } else {
+        filter_service::display_filters(&sorted_filters, open, live, verbose)?;
+    }
 
     Ok(())
 }
