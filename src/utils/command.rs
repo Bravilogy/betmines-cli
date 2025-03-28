@@ -24,10 +24,7 @@ pub fn import_filter(filter_id: i32, live: bool) -> Result<(), CliError> {
     let import_url = format!("{}/{}", base_url, filter_id);
 
     match execute_script("requests/import_filter.sh", &[&import_url]) {
-        Ok(_) => {
-            log::info!("{} imported successfully", filter_id);
-            Ok(())
-        }
+        Ok(_) => Ok(()),
         Err(e) => Err(CliError::ImportError(format!(
             "Failed to import filter {}: {}",
             filter_id, e
@@ -40,10 +37,7 @@ pub fn delete_filter(filter_id: i32, live: bool) -> Result<(), CliError> {
     let delete_url = format!("{}{}", base_url, filter_id);
 
     match execute_script("requests/delete_filter.sh", &[&delete_url]) {
-        Ok(_) => {
-            log::info!("Deleted filter {}", filter_id);
-            Ok(())
-        }
+        Ok(_) => Ok(()),
         Err(e) => Err(CliError::DeletionError(format!(
             "Failed to delete filter {}: {}",
             filter_id, e
