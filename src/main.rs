@@ -2,6 +2,7 @@ mod commands {
     pub mod analyze;
     pub mod cleanup;
     pub mod dedup;
+    pub mod outcomes;
 }
 
 mod models {
@@ -42,6 +43,15 @@ enum Commands {
 
         #[arg(short, long, help = "Treats file as live filter data")]
         live: bool,
+    },
+
+    #[command(about = "Renames filters' serviceNames based on their desiredOutcome values")]
+    Outcomes {
+        #[arg(short, long, help = "Evaluates live filters")]
+        live: bool,
+
+        #[arg(short, long, help = "Run without making actual changes")]
+        dry_run: bool,
     },
 
     #[command(about = "Remove low performing filters from betmines")]
@@ -92,6 +102,17 @@ fn main() {
     let cli = CLI::parse();
 
     match &cli.command {
+        Commands::Outcomes { live, dry_run } => {
+            log::info!(
+                "Running outcomes renaming for {} filters{}",
+                if *live { "live" } else { "pre-match" },
+                if *dry_run { " (dry-run)" } else { "" },
+            );
+
+            if let Err(err) = commands::outcomes::run(*live, *dry_run) {
+                log::error!("Failed to run outcomes command: {}", err);
+            }
+        }
         Commands::Analyze {
             filename,
             existing,

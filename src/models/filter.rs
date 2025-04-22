@@ -90,11 +90,11 @@ pub struct Filter {
 
 impl FilterValidation for Filter {
     fn is_low_performing(&self) -> bool {
-        self.success_rate < 50.0 && self.roi < 10.0 && self.total_picks > 20
+        self.roi < 10.0 && self.total_picks > 30
     }
 
     fn is_valid(&self) -> bool {
-        self.roi >= 20.0
+        self.roi >= 40.0
             && self.total_picks >= 15
             && self.desired_outcome.as_ref().map_or(false, |value| {
                 !value.starts_with("CO") && !value.starts_with("CU")
